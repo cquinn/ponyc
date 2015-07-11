@@ -37,7 +37,7 @@ Take a look at Go's `go get` which retrieves packages given a package name (and 
 
 Most Go developers don't like the import rewriting, and the whole vendoring approach has its pros and cons. The Go community is currently working on a proposal to standardize the godeps format and the mechanism that vendored packages are referenced by the compiler. This would allow vendoring to be used without import rewriting, and maybe allow for non-vendored packages.
 
-But, I think defining one higher level of containment for packages could simplify this complexity. This could be a new level of grouping above package, like a `project`, `bundle` (or `satchel`... is that too cute?), where packages were always contained within a bundle, and each bundle had exactly one remote repo defined. The bundle name would just be the first segment of the package path which would be used locally by the compiler.
+But, I think defining one higher level of containment for packages could simplify this complexity. This could be a new level of grouping above package, like a `project`, `bundle` (or `satchel`... is that too cute?), where packages were always contained within a bundle, and each bundle had exactly one remote repo defined. The bundle name would just be the first segment of the package path which would be used by the compiler for local path lookup.
 
 Then the imported bundles could be defined in a project-level `project.yaml` (or json, etc) which would describe the name to repo URL mapping, as well as the version (range?) to retrieve. Here's an example:
 
@@ -94,15 +94,15 @@ I propose that Pony support both per-project distributed bundle location, and a 
 
 ## Workflow
 
-There are a number of advantages to decoupling the retrieval of packages from their reference at compile time. Compile speed being one, but mostly it is to maintain separation of concerns: during development it is desirable to only update dependencies when explicitly requested to do so by the developer.
+There are a number of advantages to decoupling the retrieval of packages from their reference at compile time. Compile speed being one, but mostly it is to maintain the separation of concerns of retriving bundles and consuming bundles.
 
-With the above bundle definition being outside of the Pony source, and the desire to have retrieval decoupled from compile, it seems to make sense to have an external tool perform the retrieval and project.yaml update. Something like Go's 'go get', maybe 'pony fetch', would read the project.yaml and retrieve all of the used bundles and store them locally.
+With the above bundle definition being outside of the Pony source, and the desire to have retrieval decoupled from compile, it seems to make sense to have an external tool perform the retrieval and `project.yaml` update. Something like Go's `go get`, maybe `pony fetch`, would read the `project.yaml` and retrieve all of the used bundles and store them locally.
 
-This does raise the question of introducing another tool. But this is what Go has, and the Go toolset and pattern are generally considered to be one of Go's best features. How about having a general 'pony' tool that would have specific sub-commands that would fork out and run other tools. Like 'pony build' invoking ponyc, or 'pony test' running tests, or 'pony fetch' fetching bundles?
+This does introduce another tool into the Pony world. But this is what Go has, and the Go toolset and model are generally considered to be one of Go's best features.
 
 ### Proposal
 
-I propose a new 'pony' tool (written in Pony of course) that would serve as the Pony language tool hub. This tool could initially perform the following sub commands for a given project:
+I propose a new `pony` tool (written in Pony of course) that would serve as the Pony language tool hub. This tool could initially perform the following sub commands for a given project:
 
 - **pony bundle init**: generate a skeleton project.yaml file and populate it with bundles used in the Pony source, and looking up default locations when available in the central catalog.
 - **pony bundle update [*bundle*]**: update an existing project.yaml file, adding missing bundles, and optionally updating all or specific version references.
@@ -116,5 +116,5 @@ I propose a new 'pony' tool (written in Pony of course) that would serve as the 
 
 - Packages are always published and managed in source form.
 - Packages are combined into bundles that are the unit of retrieval and versioning.
-- Pony projects have a project.yaml that describes the project, including its dependant bundles.
-- There is a pony tool that manages retreiving bundles and updating project.yaml.
+- Pony projects have a `project.yaml` that describes the project, including its dependant bundles.
+- There is a `pony` tool that manages retreiving bundles and updating `project.yaml`.
