@@ -102,7 +102,7 @@ This does introduce another tool into the Pony world. But this is what Go has, a
 
 ### Proposal
 
-I propose a new `pony` tool (written in Pony of course) that would serve as the Pony language tool hub. This tool could initially perform the following sub commands for a given project:
+I propose a new `pony` tool (written in Pony of course) that would serve as the Pony tool hub. This tool could initially perform the following commands for a given project:
 
 - **pony bundle init**: generate a skeleton project.yaml file and populate it with bundles used in the Pony source, and looking up default locations when available in the central catalog.
 - **pony bundle update [*bundle*]**: update an existing project.yaml file, adding missing bundles, and optionally updating all or specific version references.
