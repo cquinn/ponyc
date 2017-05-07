@@ -1,41 +1,50 @@
-actor Spreader
-  var _env: (Env | None)
-  var _count: U64 = 0
+use "collections"
 
-  var _parent: (Spreader | None) = None
+actor Spreader
+  let _env: (Env | None)
+  let _count: U64
+  let _fanout: U64
+  let _parent: (Spreader | None)
+
   var _result: U64 = 0
   var _received: U64 = 0
 
   new create(env: Env) =>
     _env = env
-
     _count = try env.args(1).u64() else 10 end
+    _fanout = try env.args(2).u64() else 2 end
+    _parent = None
 
     if _count > 1 then
-      spawn_child()
-      spawn_child()
+      for i in Range[U64](0, _fanout) do
+        spawn_child()
+      end
     else
       env.out.print("1 actor")
     end
 
-  new spread(parent: Spreader, count: U64) =>
+  new spread(parent: Spreader, fanout:U64, count: U64) =>
     _env = None
+    _fanout = fanout
+    _count = count
+    _parent = parent
 
     if count == 1 then
       parent.result(1)
     else
-      _parent = parent
-      _count = count
-
-      spawn_child()
-      spawn_child()
+      for i in Range[U64](0, _fanout) do
+        spawn_child()
+      end
     end
+
+  fun ref spawn_child() =>
+    Spreader.spread(this, _fanout, _count - 1)
 
   be result(i: U64) =>
     _received = _received + 1
     _result = _result + i
 
-    if _received == 2 then
+    if _received == _fanout then
       match (_parent, _env)
       | (let p: Spreader, _) =>
         p.result(_result + 1)
@@ -43,9 +52,6 @@ actor Spreader
         e.out.print((_result + 1).string() + " actors")
       end
     end
-
-  fun spawn_child() =>
-    Spreader.spread(this, _count - 1)
 
 actor Main
   new create(env: Env) =>
