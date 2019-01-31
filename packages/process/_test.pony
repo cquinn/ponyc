@@ -22,8 +22,11 @@ actor Main is TestList
 
 primitive CatPath
   fun apply(): String =>
-    ifdef windows then "C:\\Windows\\System32\\find.exe"
-    else "/bin/cat" end
+    ifdef windows then
+      "C:\\Windows\\System32\\find.exe"
+    else
+      "/bin/cat"
+    end
 
 primitive CatArgs
   fun apply(): Array[String] val =>

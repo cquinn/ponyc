@@ -38,7 +38,9 @@ enum // Event requests
   ASIO_SET_TIMER = 7,
   ASIO_CANCEL_TIMER = 8,
   ASIO_SET_SIGNAL = 9,
-  ASIO_CANCEL_SIGNAL = 10
+  ASIO_CANCEL_SIGNAL = 10,
+  ASIO_SET_FD = 11,
+  ASIO_CANCEL_FD = 12
 };
 
 
@@ -116,18 +118,22 @@ DECLARE_THREAD_FN(ponyint_asio_backend_dispatch)
   asio_backend_t* b = (asio_backend_t*)arg;
   pony_assert(b != NULL);
   asio_event_t* stdin_event = NULL;
-  HANDLE handles[2];
+  HANDLE handles[3];
   handles[0] = b->wakeup;
-  handles[1] = GetStdHandle(STD_INPUT_HANDLE);
+  handles[1] = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, 0, 1);
+  handles[2] = GetStdHandle(STD_INPUT_HANDLE);
+
+  // https://docs.microsoft.com/en-us/windows/desktop/fileio/createiocompletionport
+  // Create the IOCP completion port once, and add handles as needed
 
   // handleCount indicates:
-  // 1 => only listen on queue wake event
-  // 2 => listen on queue wake event and stdin
-  int handleCount = 1;
+  // 2 => only listen on queue wake event and the fd IOCP port
+  // 3 => listen on the above two, plus stdin
+  int handleCount = 2;
 
   while(!atomic_load_explicit(&b->stop, memory_order_relaxed))
   {
-    switch(WaitForMultipleObjectsEx(handleCount, handles, FALSE, -1, TRUE))
+    switch(WaitForMultipleObjectsEx(handleCount, handles, FALSE, INFINITE, TRUE))
     {
       case WAIT_OBJECT_0:
       {
@@ -152,16 +158,16 @@ DECLARE_THREAD_FN(ponyint_asio_backend_dispatch)
               stdin_event = ev;
 
               if(stdin_event == NULL) // No-one listening, don't wait on stdin
-                handleCount = 1;
-              else  // Someone wants stdin, include it in the wait set
                 handleCount = 2;
+              else  // Someone wants stdin, include it in the wait set
+                handleCount = 3;
               break;
 
             case ASIO_STDIN_RESUME:
               // Console events have been read, we can continue waiting on
               // stdin now
               if(stdin_event != NULL)
-                handleCount = 2;
+                handleCount = 3;
               break;
 
             case ASIO_SET_TIMER:
@@ -218,6 +224,20 @@ DECLARE_THREAD_FN(ponyint_asio_backend_dispatch)
               break;
             }
 
+            case ASIO_SET_FD:
+            {
+              HANDLE hnd = (HANDLE) _get_osfhandle(ev->fd);
+              // Add our fd's handle to the IOCP
+              CreateIoCompletionPort(hnd, handles[1], ev->fd, 0);
+              //if ret null, GetLastError()
+              break;
+            }
+
+            case ASIO_CANCEL_FD:
+              // TODO: remove this hnd from our IOCP.
+              // Probably closing the hnd will do it on its own
+              break;
+
             default:  // Something's gone very wrong if we reach here
               break;
           }
@@ -227,11 +247,20 @@ DECLARE_THREAD_FN(ponyint_asio_backend_dispatch)
       }
 
       case WAIT_OBJECT_0 + 1:
+        // One of the FDs monitored by IOCP has fired
+        //GetQueuedCompletionStatus() ? GetQueuedCompletionStatus(loop->iocp,
+                              //&bytes,
+                              //&key,
+                              //&overlapped,
+                              //timeout);
+        break;
+
+      case WAIT_OBJECT_0 + 2:
         // Stdin has input available.
         // Since the console input signal state is level triggered not edge
         // triggered we have to stop waiting on stdin now until the current
         // input is read.
-        handleCount = 1;
+        handleCount = 2;
 
         // Notify the stdin event listener
         stdin_event->flags = ASIO_READ;
@@ -294,6 +323,9 @@ PONY_API void pony_asio_event_subscribe(asio_event_t* ev)
   } else if(ev->fd == 0) {
     // Need to subscribe to stdin
     send_request(ev, ASIO_STDIN_NOTIFY);
+  } else { // not timer or signal or stdin, must be another fd, like a pipe
+    // Need to add the fd to the one IOCP port
+    send_request(ev, ASIO_SET_FD);
   }
 }
 
