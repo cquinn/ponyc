@@ -82,7 +82,6 @@ class _Pipe
         error
       end
     else
-      // Unknown platform
       compile_error "unsupported platform"
     end
     Debug("  created pipe, near_fd: " + near_fd.string() + ", far_fd: " + far_fd.string())
@@ -101,10 +100,10 @@ class _Pipe
     been handed to the other process.
     """
     ifdef posix then
-      Debug("begin:: near_fd: " + near_fd.string() + ", outgoing: " + outgoing.string())
+      //Debug("begin:: near_fd: " + near_fd.string() + ", outgoing: " + outgoing.string())
       let flags = if outgoing then AsioEvent.write() else AsioEvent.read() end
       event = @pony_asio_event_create(owner, near_fd, flags, 0, true)
-      Debug("  created event: " + event.usize().string())
+      //Debug("  created event: " + event.usize().string())
       close_far()
     end
 
@@ -114,7 +113,7 @@ class _Pipe
     using. This is used to cleanup this process' handles that it wont use.
     """
     if far_fd != -1 then
-      Debug("closed_far:: far_fd: " + far_fd.string())
+      //Debug("closed_far:: far_fd: " + far_fd.string())
       @close[I32](far_fd)
       far_fd = -1
     end
