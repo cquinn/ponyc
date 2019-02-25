@@ -1,3 +1,5 @@
+use "debug"
+
 use @pony_asio_event_create[AsioEventID](owner: AsioEventNotify, fd: U32,
       flags: U32, nsec: U64, noisy: Bool)
 use @pony_asio_event_unsubscribe[None](event: AsioEventID)
@@ -72,9 +74,11 @@ class _Pipe
     """
     Do the actual system object creation for the pipe.
     """
+    Debug("create:: outgoing:" + _outgoing.string())
     ifdef posix then
       var fds = (U32(0), U32(0))
       if @pipe[I32](addressof fds) < 0 then
+        Debug("  create pipe failed")
         error
       end
       if _outgoing then
@@ -97,11 +101,13 @@ class _Pipe
       // to be done with the knowledge of which way this pipe goes.
       if @ponyint_win_pipe_create[U32](addressof near_fd, addressof far_fd,
           _outgoing) == 0 then
+        Debug("  create pipe failed")
         error
       end
     else
       compile_error "unsupported platform"
     end
+    Debug("  created pipe, near_fd:" + near_fd.string() + " far_fd:" + far_fd.string())
 
   fun _set_fd(fd: U32, flags: I32) ? =>
     let result = @fcntl[I32](fd, _FSETFD(), flags)
@@ -117,8 +123,10 @@ class _Pipe
     been handed to the other process.
     """
     ifdef posix then
+      Debug("begin:: near_fd:" + near_fd.string() + " outgoing:" + _outgoing.string())
       let flags = if _outgoing then AsioEvent.write() else AsioEvent.read() end
       event = @pony_asio_event_create(owner, near_fd, flags, 0, true)
+      Debug("  created event:" + event.usize().string())
     end
     close_far()
 
@@ -128,6 +136,7 @@ class _Pipe
     using. This is used to cleanup this process' handles that it wont use.
     """
     if far_fd != -1 then
+      //Debug("closed_far:: far_fd: " + far_fd.string())
       @close[I32](far_fd)
       far_fd = -1
     end
@@ -147,12 +156,15 @@ class _Pipe
     else // windows
       let hnd: USize = @_get_osfhandle[USize](near_fd)
       var bytes_to_read: U32 = (read_buf.size() - offset).u32()
+      Debug("read:: near_fd:" + near_fd.string() + " offset:" + offset.string() + " bytes_to_read:" + bytes_to_read.string())
       // Peek ahead to see if there is anything to read, return if not
       var bytes_avail: U32 = 0
       let okp = @PeekNamedPipe[Bool](hnd, USize(0), bytes_to_read, USize(0),
           addressof bytes_avail, USize(0))
       let winerrp = @GetLastError[I32]()
+      Debug("  PeekNamedPipe: bytes_avail:" + bytes_avail.string() + " ok:" + okp.string())
       if not okp then
+        Debug("  winerr:" + winerrp.string())
         if (winerrp == _ERRORBROKENPIPE()) or (winerrp == _ERRORNODATA()) then
           return (consume read_buf, 0, 0) // Pipe is done & ready to close.
         else
@@ -160,18 +172,22 @@ class _Pipe
           return (consume read_buf, -1, _EINVAL())
         end
       elseif bytes_avail == 0 then
+        Debug("  nothing available to read now, signal to try again")
         // Peeked ok, but nothing to read. Return and try again later.
         return (consume read_buf, -1, _EAGAIN())
       end
       if bytes_to_read > bytes_avail then
         bytes_to_read = bytes_avail
+        Debug("  adjusted bytes_to_read:" + bytes_to_read.string())
       end
       // Read up to the bytes available
       var bytes_read: U32 = 0
       let ok = @ReadFile[Bool](hnd, read_buf.cpointer().usize() + offset,
           bytes_to_read, addressof bytes_read, USize(0))
       let winerr = @GetLastError[I32]()
+      Debug("  ReadFile: bytes_read:" + bytes_read.string() + " ok:" + ok.string())
       if not ok then
+        Debug("  winerr:" + winerr.string())
         if (winerr == _ERRORBROKENPIPE()) or (winerr == _ERRORNODATA()) then
           (consume read_buf, 0, 0) // Pipe is done & ready to close.
         else
@@ -179,6 +195,7 @@ class _Pipe
         end
       else
         // We know bytes_to_read is > 0, and can assume bytes_read is as well
+        Debug("  read some:" + bytes_read.isize().string())
         (consume read_buf, bytes_read.isize(), 0) // buffer back, bytes read, no error
       end
     end
@@ -195,19 +212,24 @@ class _Pipe
     else // windows
       let hnd: USize = @_get_osfhandle[USize](near_fd)
       let bytes_to_write: U32 = (data.size() - offset).u32()
+      Debug("write:: near_fd:" + near_fd.string() + " offset:" + offset.string() + " bytes_to_write:" + bytes_to_write.string())
       var bytes_written: U32 = 0
       let ok = @WriteFile[Bool](hnd, data.cpointer().usize() + offset,
           bytes_to_write, addressof bytes_written, USize(0))
       let winerr = @GetLastError[I32]()
+      Debug("  WriteFile: bytes_written: " + bytes_written.string() + ", ok:" + ok.string())
       if not ok then
+        Debug("  winerr:" + winerr.string())
         if (winerr == _ERRORBROKENPIPE()) or (winerr == _ERRORNODATA()) then
           (0, 0) // Pipe is done & ready to close.
         else
           (-1, _EINVAL()) // Some other error, map to invalid arg
         end
       elseif bytes_written == 0 then
+        Debug("  nothing written, signal to try again")
         (-1, _EAGAIN())
       else
+        Debug("  wrote some: " + bytes_written.isize().string())
         (bytes_written.isize(), 0)
       end
     end
@@ -226,17 +248,23 @@ class _Pipe
     operation.
     """
     if near_fd != -1 then
+      Debug("close_near:: near_fd:" + near_fd.string())
       if event isnt AsioEvent.none() then
+        Debug("  unsubscribing event:" + event.usize().string())
         @pony_asio_event_unsubscribe(event)
       end
       @close[I32](near_fd)
+      Debug("  closed pipe near_fd:" + near_fd.string())
       near_fd = -1
     end
 
   fun ref close() =>
+    Debug("close:: near_fd:" + near_fd.string() + " far_fd:" + far_fd.string())
     close_far()
     close_near()
 
   fun ref dispose() =>
+    Debug("dispose:: near_fd:" + near_fd.string() + " event:" + event.usize().string())
     @pony_asio_event_destroy(event)
+    Debug("  disposed event & noning:" + event.usize().string())
     event = AsioEvent.none()

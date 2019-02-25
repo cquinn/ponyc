@@ -27,6 +27,12 @@ PONY_API uint32_t ponyint_win_pipe_create(uint32_t* near_fd, uint32_t* far_fd, b
     sa.lpSecurityDescriptor = NULL;
     sa.bInheritHandle = TRUE;  // default to inherit, clear the flag on the near hnd later
 
+    printf("cdeb: sizeof(SECURITY_ATTRIBUTES):%d len:%d sd:%d ih:%d\n", (int)sizeof(sa),
+        (uint32_t)((uint8_t*)&sa.nLength - (uint8_t*)&sa),
+        (uint32_t)((uint8_t*)&sa.lpSecurityDescriptor - (uint8_t*)&sa),
+        (uint32_t)((uint8_t*)&sa.bInheritHandle - (uint8_t*)&sa)
+    );
+
     HANDLE read_hnd;
     HANDLE write_hnd;
     if (!CreatePipe(&read_hnd, &write_hnd, &sa, 0)) {
@@ -59,6 +65,9 @@ PONY_API size_t ponyint_win_process_create(
     char* environ,
     uint32_t stdin_fd, uint32_t stdout_fd, uint32_t stderr_fd)
 {
+    printf("cdeb: appname:%s  cmdline:%s\n", appname, cmdline);
+    printf("cdeb: infd:%d  outfd:%d  errfd:%d\n", stdin_fd, stdout_fd, stderr_fd);
+
     STARTUPINFO si;
     ZeroMemory(&si, sizeof(si));
     si.cb = sizeof(si);
@@ -67,8 +76,13 @@ PONY_API size_t ponyint_win_process_create(
     si.hStdOutput = (HANDLE) _get_osfhandle(stdout_fd);
     si.hStdError = (HANDLE) _get_osfhandle(stderr_fd);
 
+    printf("cdeb: sizeof(STARTUPINFO):%d\n", si.cb);
+    printf("cdeb: inh:%lld  outh:%lld  errh:%lld\n", (uint64_t)si.hStdInput, (uint64_t)si.hStdOutput, (uint64_t)si.hStdError);
+
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(pi));
+
+    printf("cdeb: sizeof(PROCESS_INFORMATION):%d\n", (int)sizeof(pi));
 
     BOOL success = CreateProcess(
         appname,
@@ -81,6 +95,8 @@ PONY_API size_t ponyint_win_process_create(
         NULL,        // use parent's current directory
         &si,         // STARTUPINFO pointer
         &pi);        // receives PROCESS_INFORMATION
+
+    printf("cdeb: success:%d  hProcess:%lld  processId:%ld\n", success, (uint64_t)pi.hProcess, pi.dwProcessId);
 
     if (success) {
         // Close the thread handle now as we don't need access to it

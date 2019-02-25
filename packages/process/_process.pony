@@ -1,3 +1,4 @@
+use "debug"
 use "signals"
 use @pony_os_errno[I32]()
 
@@ -158,11 +159,16 @@ class _ProcessWindows is _Process
     stderr: _Pipe)
   =>
     ifdef windows then
+      Debug("Path: " + path)
+      Debug("Stdin: " + stdin.near_fd.string() + " " + stdin.far_fd.string())
+      Debug("Stdout: " + stdout.near_fd.string() + " " + stdout.far_fd.string())
+      Debug("Stderr: " + stderr.near_fd.string() + " " + stderr.far_fd.string())
       hProcess = @ponyint_win_process_create[USize](
           path.cstring(),
           _make_cmdline(args).cstring(),
           _make_environ(vars).cpointer(),
           stdin.far_fd, stdout.far_fd, stderr.far_fd)
+      Debug("hProcess: " + hProcess.string())
     else
       compile_error "unsupported platform"
     end
@@ -183,6 +189,7 @@ class _ProcessWindows is _Process
     var environ = Array[U8](size)
     for varr in vars.values() do
       environ.append(varr)
+      Debug("Environ: " + varr)
       environ.push(0)
     end
     environ.push(0)
@@ -190,12 +197,16 @@ class _ProcessWindows is _Process
 
   fun kill() =>
     if hProcess != 0 then
+      Debug("Kill: " + hProcess.string())
       @ponyint_win_process_kill[I32](hProcess)
     end
 
   fun ref wait(): I32 =>
     if hProcess != 0 then
-      @ponyint_win_process_wait[I32](hProcess)
+      Debug("Wait: " + hProcess.string())
+      let ec = @ponyint_win_process_wait[I32](hProcess)
+      Debug("  ec: " + ec.string())
+      ec
     else
       -1
     end

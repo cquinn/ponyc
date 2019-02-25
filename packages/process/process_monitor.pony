@@ -86,6 +86,7 @@ Document waitpid behaviour (stops world)
 """
 use "backpressure"
 use "collections"
+use "debug"
 use "files"
 use "time"
 
@@ -255,6 +256,7 @@ actor ProcessMonitor
     Set the _done_writing flag to true. If _pending is empty we can close the
     _stdin pipe.
     """
+    Debug("done_writing")
     _done_writing = true
     Backpressure.release(_backpressure_auth)
     if _pending.size() == 0 then
@@ -284,21 +286,33 @@ actor ProcessMonitor
     match event
     | _stdin.event =>
       if AsioEvent.writeable(flags) then
+        Debug("event: stdin(" + event.usize().string() + ") Writable")
         _pending_writes()
       elseif AsioEvent.disposable(flags) then
+        Debug("event: stdin(" + event.usize().string() + ") Disposable")
         _stdin.dispose()
+      else
+        Debug("event: stdin(" + event.usize().string() + ") " + flags.string())
       end
     | _stdout.event =>
       if AsioEvent.readable(flags) then
+        Debug("event: stdout(" + event.usize().string() + ") Readable")
         _pending_reads(_stdout)
       elseif AsioEvent.disposable(flags) then
+        Debug("event: stdout(" + event.usize().string() + ") Disposable")
         _stdout.dispose()
+      else
+        Debug("event: stdout(" + event.usize().string() + ") " + flags.string())
       end
     | _stderr.event =>
       if AsioEvent.readable(flags) then
+        Debug("event: stderr(" + event.usize().string() + ") Readable")
         _pending_reads(_stderr)
       elseif AsioEvent.disposable(flags) then
+        Debug("event: stderr(" + event.usize().string() + ") Disposable")
         _stderr.dispose()
+      else
+        Debug("event: stderr(" + event.usize().string() + ") " + flags.string())
       end
     end
     _try_shutdown()
@@ -307,8 +321,11 @@ actor ProcessMonitor
     """
     Windows IO polling timer has fired
     """
+    Debug("timer_notify:: stdin")
     _pending_writes() // try writes
+    Debug("timer_notify:: stdout")
     _pending_reads(_stdout)
+    Debug("timer_notify:: stderr")
     _pending_reads(_stderr)
     _try_shutdown()
 
@@ -317,6 +334,7 @@ actor ProcessMonitor
     Close all pipes and wait for the child process to exit.
     """
     if not _closed then
+      Debug("_close::")
       _closed = true
       _stdin.close()
       _stdout.close()
@@ -353,6 +371,7 @@ actor ProcessMonitor
     It's safe to use the same buffer for stdout and stderr because of
     causal messaging. Events get processed one _after_ another.
     """
+    Debug("_pending_reads:: near_fd:" + pipe.near_fd.string() + " pipe.closed:" + pipe.is_closed().string() + " _read_len:" + _read_len.string())
     if pipe.is_closed() then return end
     var sum: USize = 0
     while true do
@@ -360,14 +379,18 @@ actor ProcessMonitor
         pipe.read(_read_buf = recover Array[U8] end, _read_len)
 
       let next = _read_buf.space()
+      Debug("  read done: len:" + len.string() + " errno:" + errno.string() + " next:" + next.string())
       match len
       | -1 =>
         if (errno == _EAGAIN()) then
+          Debug("  read -1 & EAGAIN, going to try again later")
           return // nothing to read right now, try again later
         end
+        Debug("  read -1, not EAGAIN, pipe must have errored. closing our end.")
         pipe.close()
         return
       | 0  =>
+        Debug("  read 0, pipe must be closed. closing our end.")
         pipe.close()
         return
       end
@@ -392,6 +415,7 @@ actor ProcessMonitor
       sum = sum + len.usize()
       if sum > (1 << 12) then
         // If we've read 4 kb, yield and read again later.
+        Debug("  read enough for now:" + sum.string() + " will read again.")
         _read_again(pipe.near_fd)
         return
       end
@@ -408,6 +432,7 @@ actor ProcessMonitor
     """
     Resume reading on file descriptor.
     """
+    Debug("_read_again:: near_fd:" + near_fd.string())
     match near_fd
     | _stdout.near_fd => _pending_reads(_stdout)
     | _stderr.near_fd => _pending_reads(_stderr)
@@ -419,6 +444,7 @@ actor ProcessMonitor
     pending writes. Save everything unwritten into _pending and apply
     backpressure.
     """
+    Debug("_write_final:: bytes:" + data.size().string() + " stdin.closed:" + _stdin.is_closed().string() + " _pending.size:" + _pending.size().string())
     if (not _closed) and not _stdin.is_closed() and (_pending.size() == 0) then
       // Send as much data as possible.
       (let len, let errno) = _stdin.write(data, 0)
@@ -426,10 +452,12 @@ actor ProcessMonitor
       if len == -1 then // write error
         if errno == _EAGAIN() then
           // Resource temporarily unavailable, send data later.
+          Debug("  couldn't write, will try again.")
           _pending.push((data, 0))
           Backpressure.apply(_backpressure_auth)
         else
           // Notify caller of error, close fd and done.
+          Debug("  couldn't write, giving up and closing pipe.")
           _notifier.failed(this, WriteError)
           _stdin.close_near()
         end
@@ -437,8 +465,11 @@ actor ProcessMonitor
         // Send any remaining data later.
         _pending.push((data, len.usize()))
         Backpressure.apply(_backpressure_auth)
+      else
+        Debug("  complete write")
       end
     else
+      Debug("  deferring write since _pending is non-empty.")
       // Send later, when the pipe is available for writing.
       _pending.push((data, 0))
       Backpressure.apply(_backpressure_auth)
@@ -451,6 +482,7 @@ actor ProcessMonitor
     and they can only be written here. If the _done_writing flag is set, close
     the pipe once we've processed pending writes.
     """
+    Debug("_pending_writes:: stdin.closed:" + _stdin.is_closed().string() + " pending.size:" + _pending.size().string())
     while (not _closed) and not _stdin.is_closed() and (_pending.size() > 0) do
       try
         let node = _pending.head()?
@@ -462,19 +494,23 @@ actor ProcessMonitor
         if len == -1 then // OS signals write error
           if errno == _EAGAIN() then
             // Resource temporarily unavailable, send data later.
+            Debug("  couldn't write, will try again.")
             return
           else
             // Close pipe and bail out.
+            Debug("  couldn't write, giving up and closing pipe.")
             _notifier.failed(this, WriteError)
             _stdin.close_near()
             return
           end
         elseif (len.usize() + offset) < data.size() then
           // Send remaining data later.
+          Debug("  partial write:" + len.usize().string() + "/" + (data.size() - offset).string() + " will enqueue and try again later.")
           node()? = (data, offset + len.usize())
           return
         else
           // This pending chunk has been fully sent.
+          Debug("  complete write")
           _pending.shift()?
           if (_pending.size() == 0) then
             Backpressure.release(_backpressure_auth)
